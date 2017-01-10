@@ -1,0 +1,33 @@
+client sends http requests
+web proxy listens to outgoing connections (http)
+web proxy returns response to client
+
+
+Request logic/loop
+==================
+1. http request from client is made
+2. web proxy intercepts http request
+3. web proxy sends starts new thread for request, incr counter
+4. new thread sends request, returns response body and headers
+5. web proxy receives response objects 
+    a. if retry conditions, then incr counter and retry
+    b. elif OK, then send response back to client
+
+
+Rate limiter logic
+==================
+Objects:
+    Tokens (doesn't need to be locked, because resource is accessed async)
+    Requests
+    Reactor loop
+
+0. External application sends request URL (string).
+1. If enough time has elapsed since last drip, drip. 
+   This means to put tokens in bucket equal to (# Tokens/Time)*(Now - lastDripTime)
+2. Check if there are enough tokens in the bucket to make a request.
+   1 token/request.
+    True: Go to 3.
+    False: Go to 4.
+3. Decrease token count by 1. Make request.
+4. Tell reactor loop to call [1] at next drip time or 1 second.
+
