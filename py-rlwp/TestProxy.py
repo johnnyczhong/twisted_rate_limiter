@@ -65,6 +65,9 @@ class RequestService():
 # makes a call to a method stored by the factory.
 # middle context, handles incoming connections and responds back
 class RequestProtocol(NetstringReceiver):
+    def connectionMade(self):
+        self.factory.numProtocols += 1
+        #print('Current number of protocols: {}'.format(self.factory.numProtocols))
 
     # parse string out of Netstring
     def stringReceived(self, request):
@@ -73,12 +76,22 @@ class RequestProtocol(NetstringReceiver):
         
     def process_request(self, request):
         response = self.factory.req(request)
-        response = json.dumps(response) # encode as JSON string
-        response = response.encode('utf-8') # encode JSON string as bytes object
+        if response is not None:
+            response = json.dumps(response) # encode as JSON string
+            response = response.encode('utf-8') # encode JSON string as bytes object
 
-        if response is not None: # account for error here
             self.sendString(response) # send response to client as bytes/netstring
-        self.transport.loseConnection()
+            self.transport.loseConnection()
+        else: # attempt function again
+            #self.sendString(timeout)
+            wait_time = (self.factory.numProtocols 
+                    - self.factory.curr_tokens_10) * (10/self.factory.tokens_per_10)
+            print('waiting for {}'.format(wait_time))
+            reactor.callLater(self.factory.numProtocols, 
+                    self.process_request, request)
+
+    def connectionLost(self, reason):
+        self.factory.numProtocols -= 1
 
 # purpose: creates instances of protocols in response to connections
 # keep rate limits here
@@ -89,6 +102,7 @@ class RequestFactory(ServerFactory):
 
     def __init__(self, service):
         self.service = service
+        self.numProtocols = 0
         self.curr_tokens_10 = 10
         self.last_token_time = time.time() # now
         #self.tokens_10_minimum_refresh = 1
@@ -120,17 +134,18 @@ class RequestFactory(ServerFactory):
             # not to exceed 10
             tokens = int(time.time() - self.last_token_time)
             tokens = 10 if (tokens > 10) else tokens # redundant?
-            print('New token count: {} at {}'.format(tokens, now))
+            #print('New token count: {} at {}'.format(tokens, now))
             self.curr_tokens_10 += tokens
             self.curr_tokens_10 = 10 if (self.curr_tokens_10 > 10) else self.curr_tokens_10
             self.last_token_time = now
         # if we don't have tokens, have reactor come back at next token refresh time.
         if self.curr_tokens_10 <= 1:
-            reactor.callLater(1, self.req, url)
+            #reactor.callLater(1, self.req, url)
+            return None
         else:
-            print('Subtracting a token from: {}'.format(self.curr_tokens_10))
+            #print('Subtracting a token from: {}'.format(self.curr_tokens_10))
             self.curr_tokens_10 -= 1
-            print('Current token count: {}'.format(self.curr_tokens_10))
+            #print('Current token count: {}'.format(self.curr_tokens_10))
             try:
                 resp = self.service.make_request(url) # make request to Riot
                 return resp
